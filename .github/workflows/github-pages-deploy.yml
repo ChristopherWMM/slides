@@ -1,0 +1,77 @@
+name: Deploy on GitHub Pages
+on: 
+  push:
+    paths:
+    - 'slides/**'
+
+permissions: 
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Slidev
+        run: npm i -g @slidev/cli
+
+      - name: Determine slides to rebuild
+        id: determine-slides
+        run: |
+          # Initialize an empty array to hold the slides to be rebuilt
+          slides_to_build=()
+
+          # If common files are modified, add all slides to the build list
+          if git diff --name-only ${{ github.sha }} HEAD~1 | grep -q 'slides/common'; then
+            for dir in slides/*/; do
+              slide=$(basename "$dir")
+              slides_to_build+=("$slide")
+            done
+          else
+            # Otherwise, add only the modified slides
+            for dir in slides/*/; do
+              slide=$(basename "$dir")
+              if git diff --name-only ${{ github.sha }} HEAD~1 | grep -q "slides/$slide/"; then
+                slides_to_build+=("$slide")
+              fi
+            done
+          fi
+
+          # Set the list as an environment variable
+          echo "slides_to_build=${slides_to_build[*]}" >> "$GITHUB_ENV"
+
+      - name: Build slides
+        run: |
+          for slide in ${{ env.slides_to_build }}; do
+            slidev build --base /slides/$slide slides/$slide/$slide.md
+          done
+
+      - name: Create index.html
+        run: |
+          # Create index.html with links to all slides
+          echo "<html><body><h1>Slides</h1><ul>" > index.html
+          for dir in slides/*/; do
+            slide=$(basename "$dir")
+            echo "<li><a href=\"/slides/$slide\">$slide</a></li>" >> index.html
+          done
+          echo "</ul></body></html>" >> index.html
+
+      - name: Deploy all slides and index.html 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages # The branch the action should deploy to.
+          folder: slides # The folder containing all built slides and index.html.
+          target-folder: '' # Root directory of the gh-pages branch
+          clean: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
